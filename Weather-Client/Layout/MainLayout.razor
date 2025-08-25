@@ -1,0 +1,68 @@
+﻿@inherits LayoutComponentBase
+@inject Client.Services.SupabaseAuthService AuthService
+@inject IJSRuntime JS
+
+<div class="page">
+  <div class="sidebar">
+    <NavMenu />
+  </div>
+
+  <main>
+    <div class="top-row auth">
+      <!-- Dark/Light toggle -->
+      <button class="btn btn-link" @onclick="ToggleTheme">
+        @(isDark ? "🌙 Dark" : "☀️ Light")
+      </button>
+
+      <!-- Show user + logout only when signed in -->
+      @if (AuthService.IsLoggedIn)
+      {
+        <span class="user-email">@AuthService.CurrentUser?.Email</span>
+        <button class="btn btn-link" @onclick="Logout">Logout</button>
+      }
+    </div>
+
+    <article class="content px-4">
+      @Body
+    </article>
+  </main>
+</div>
+
+@code {
+  private bool isDark;
+
+  protected override async Task OnInitializedAsync()
+  {
+    // 1) Restore Supabase session
+    await AuthService.InitializeAsync();
+    AuthService.OnAuthStateChanged += StateHasChanged;
+
+    // 2) Pull theme from localStorage
+    var saved = await JS.InvokeAsync<string>("localStorage.getItem", "theme");
+    isDark = saved == "dark";
+    await ApplyThemeAsync();
+  }
+
+  private async Task ToggleTheme()
+  {
+    isDark = !isDark;
+    await ApplyThemeAsync();
+  }
+
+  private async Task ApplyThemeAsync()
+  {
+    // Add or remove the dark‐theme class on <body>
+    if (isDark)
+      await JS.InvokeVoidAsync("document.body.classList.add", "dark-theme");
+    else
+      await JS.InvokeVoidAsync("document.body.classList.remove", "dark-theme");
+
+    // Persist
+    await JS.InvokeVoidAsync("localStorage.setItem", "theme", isDark ? "dark" : "light");
+  }
+
+  private async Task Logout()
+  {
+    await AuthService.SignOutAsync();
+  }
+}

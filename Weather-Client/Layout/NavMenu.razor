@@ -1,0 +1,63 @@
+﻿@using Microsoft.AspNetCore.Components.Routing
+@inject Client.Services.SupabaseAuthService AuthService
+
+<nav class="nav-scrollable">
+  <ul class="nav flex-column">
+    <li class="nav-item">
+      <NavLink href="" class="nav-link" Match="NavLinkMatch.All">
+        <span class="bi bi-house-door-fill-nav-menu"></span>
+        Home
+      </NavLink>
+    </li>
+    <li class="nav-item">
+      <NavLink href="weather" class="nav-link">
+        <span class="bi bi-cloud-sun-nav-menu"></span>
+        Weather
+      </NavLink>
+    </li>
+    
+    @if (AuthService.IsLoggedIn)
+    {
+      <li class="nav-item">
+        <NavLink href="dashboard" class="nav-link">
+          <span class="bi bi-speedometer2-nav-menu"></span>
+          Custom Dashboard
+        </NavLink>
+      </li>
+      <li class="nav-item">
+        <NavLink href="logout" class="nav-link" @onclick="Logout">
+          <span class="bi bi-box-arrow-right-nav-menu"></span>
+          Logout (@AuthService.UserEmail)
+        </NavLink>
+      </li>
+    }
+    else
+    {
+      <li class="nav-item">
+        <NavLink href="login" class="nav-link">
+          <span class="bi bi-box-arrow-in-right-nav-menu"></span>
+          Login
+        </NavLink>
+      </li>
+      <li class="nav-item">
+        <NavLink href="register" class="nav-link">
+          <span class="bi bi-person-plus-nav-menu"></span>
+          Register
+        </NavLink>
+      </li>
+    }
+  </ul>
+</nav>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        await AuthService.InitializeAsync();
+        AuthService.OnAuthStateChanged += StateHasChanged;
+    }
+
+    private async Task Logout()
+    {
+        await AuthService.SignOutAsync();
+    }
+}

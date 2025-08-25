@@ -1,0 +1,184 @@
+@page "/forecast"
+@inject Client.Services.ForecastService ForecastService
+@inject Client.Services.ApiAuthService AuthService
+@inject IJSRuntime JSRuntime
+
+<h3>@(forecast?.City?.Name ?? "Forecast")</h3>
+
+<div class="mb-3">
+    <input @bind="city" @bind:event="oninput" placeholder="Enter city name" class="form-control d-inline-block" style="max-width: 300px;" />
+    <button class="btn btn-primary ms-2" @onclick="GetForecastByCity" disabled="@(loading || string.IsNullOrWhiteSpace(city))">
+        @(loading ? "Loading..." : "Get Forecast")
+    </button>
+    <button class="btn btn-secondary ms-2" @onclick="GetForecastByGeolocation" disabled="loading">
+        Weather Near You
+    </button>
+    @if (AuthService.IsLoggedIn && !string.IsNullOrWhiteSpace(city))
+    {
+        <button class="btn btn-outline-danger ms-2" @onclick="ToggleFavorite" title="@favoriteTooltip">
+            <i class="@favoriteIcon"></i>
+        </button>
+    }
+</div>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+else if (loading)
+{
+    <div class="text-center">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2">Loading forecast data...</p>
+    </div>
+}
+else if (forecast != null && forecast.List != null && forecast.List.Any())
+{
+    <div class="forecast-timeline">
+        @foreach (var dayGroup in forecast.List.GroupBy(item => DateTime.Parse(item.Dt_Txt ?? "").Date))
+        {
+            <div class="day-group mb-4">
+                <h5>@dayGroup.Key.ToString("dddd, MMMM d")</h5>
+                <div class="d-flex flex-wrap gap-3">
+                    @foreach (var slot in dayGroup)
+                    {
+                        <div class="card forecast-slot p-2" style="width: 140px;">
+                            <div class="text-center">
+                                <div><strong>@DateTime.Parse(slot.Dt_Txt ?? "").ToLocalTime().ToString("HH:mm")</strong></div>
+                                @if (slot.Weather != null && slot.Weather.Any())
+                                {
+                                    <img src="@($"https://openweathermap.org/img/wn/{slot.Weather[0].Icon}@2x.png")" alt="@slot.Weather[0].Description" style="width:48px;height:48px;" />
+                                    <div><small>@slot.Weather[0].Main</small></div>
+                                }
+                                <div><strong>@slot.Main?.Temp.ToString("F1")°C</strong></div>
+                                <div><small>Wind: @slot.Wind?.Speed.ToString("F1") m/s</small></div>
+                                <div><small>Humidity: @slot.Main?.Humidity %</small></div>
+                                <div><small>POP: @(slot.Pop * 100)%</small></div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private string city = "";
+    private Client.Models.ForecastResponse? forecast;
+    private bool loading = false;
+    private string? errorMessage;
+
+    private bool isFavorite = false;
+    private string favoriteIcon => isFavorite ? "fas fa-heart" : "far fa-heart";
+    private string favoriteTooltip => isFavorite ? "Remove from Favorites" : "Add to Favorites";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var lastCity = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "lastCity");
+        if (!string.IsNullOrWhiteSpace(lastCity))
+        {
+            city = lastCity;
+            await GetForecastByCity();
+        }
+    }
+
+    private async Task GetForecastByCity()
+    {
+        loading = true;
+        errorMessage = null;
+        forecast = null;
+        isFavorite = false;
+
+        try
+        {
+            forecast = await ForecastService.GetForecastByCityAsync(city);
+            if (forecast == null || forecast.List == null || !forecast.List.Any())
+            {
+                errorMessage = $"No forecast data found for '{city}'.";
+            }
+            else
+            {
+                await JSRuntime.InvokeVoidAsync("localStorage.setItem", "lastCity", city);
+                if (AuthService.IsLoggedIn)
+                {
+                    var favorites = await AuthService.GetFavoriteCitiesAsync();
+                    isFavorite = favorites.Contains(city, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task GetForecastByGeolocation()
+    {
+        loading = true;
+        errorMessage = null;
+        forecast = null;
+        isFavorite = false;
+
+        try
+        {
+            // call the JS wrapper that returns a Promise -> { Latitude, Longitude }
+            var position = await JSRuntime.InvokeAsync<GeolocationResult>("geoInterop.getCurrentPosition");
+
+            forecast = await ForecastService.GetForecastByCoordinatesAsync(position.Latitude, position.Longitude);
+            if (forecast == null || forecast.List == null || !forecast.List.Any())
+            {
+                errorMessage = "No forecast data available for your location.";
+            }
+            else
+            {
+                // forecast.City is an object (CityInfo) — use its Name
+                city = forecast.City?.Name ?? "Your Location";
+                if (AuthService.IsLoggedIn)
+                {
+                    var favorites = await AuthService.GetFavoriteCitiesAsync();
+                    isFavorite = favorites.Contains(city, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error getting location: {ex.Message}";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task ToggleFavorite()
+    {
+        if (!AuthService.IsLoggedIn || string.IsNullOrWhiteSpace(city))
+            return;
+
+        if (isFavorite)
+        {
+            var removed = await AuthService.RemoveFavoriteCityAsync(city);
+            if (removed)
+                isFavorite = false;
+        }
+        else
+        {
+            var added = await AuthService.AddFavoriteCityAsync(city);
+            if (added)
+                isFavorite = true;
+        }
+    }
+
+    private class GeolocationResult
+    {
+        public double Latitude { get; set; }
+        public double Longitude { get; set; }
+    }
+}

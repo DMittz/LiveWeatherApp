@@ -1,0 +1,206 @@
+@page "/dashboard"
+@inject Client.Services.ApiAuthService AuthService
+@inject Client.Services.WeatherService WeatherService
+@inject NavigationManager Navigation
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using Client.Services
+@using Microsoft.AspNetCore.Components
+@using System.Net.Http
+@using Client.Models
+
+<div class="dashboard-container">
+    <h3 class="mb-4">Custom Dashboard</h3>
+
+    @if (!AuthService.IsLoggedIn)
+    {
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            Please <a href="/login" class="alert-link">login</a> to access your dashboard.
+        </div>
+    }
+    else
+    {
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Your Favorite Cities</h5>
+                    </div>
+                    <div class="card-body">
+                        @if (favoriteCities == null)
+                        {
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </div>
+                        }
+                        else if (!favoriteCities.Any())
+                        {
+                            <p class="text-muted">No favorite cities yet. Add some from the Weather page!</p>
+                        }
+                        else
+                        {
+                            <div class="list-group">
+                                @foreach (var city in favoriteCities)
+                                {
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <strong>@city</strong>
+                                            @if (weatherData.ContainsKey(city) && weatherData[city] != null)
+                                            {
+                                                var weather = weatherData[city];
+                                                var temp = weather?.Main?.Temp ?? 0;
+                                                var description = weather?.Weather?[0]?.Description ?? "N/A";
+                                                <br />
+                                                <small class="text-muted">
+                                                    @temp.ToString("F0")°C - @description
+                                                </small>
+                                            }
+                                        </div>
+                                        <div>
+                                            <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => LoadWeather(city)">
+                                                <i class="bi bi-cloud-sun"></i> View
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveFavorite(city)">
+                                                <i class="bi bi-heart-fill"></i> Remove
+                                            </button>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                @if (selectedCity != null && selectedWeather != null)
+                {
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">@selectedCity - Current Weather</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>Temperature: @((selectedWeather.Main?.Temp ?? 0).ToString("F0"))°C</h6>
+                                    <p>Condition: @(selectedWeather.Weather?[0]?.Description ?? "N/A")</p>
+                                    <p>Humidity: @(selectedWeather.Main?.Humidity ?? 0)%</p>
+                                    <p>Wind: @(selectedWeather.Wind?.Speed ?? 0) m/s</p>
+                                </div>
+                                <div class="col-md-6">
+                                    <p>Feels like: @((selectedWeather.Main?.FeelsLike ?? 0).ToString("F0"))°C</p>
+                                    <p>Pressure: @(selectedWeather.Main?.Pressure ?? 0) hPa</p>
+                                    @{
+                                        var sunrise = selectedWeather.Sys?.Sunrise ?? 0;
+                                        var sunset = selectedWeather.Sys?.Sunset ?? 0;
+                                        var sunriseTime = sunrise > 0 ? DateTimeOffset.FromUnixTimeSeconds(sunrise).ToString("HH:mm") : "N/A";
+                                        var sunsetTime = sunset > 0 ? DateTimeOffset.FromUnixTimeSeconds(sunset).ToString("HH:mm") : "N/A";
+                                    }
+                                    <p>Sunrise: @sunriseTime</p>
+                                    <p>Sunset: @sunsetTime</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<string> favoriteCities = new();
+    private Dictionary<string, OpenWeatherResponse?> weatherData = new();
+    private string? selectedCity;
+    private OpenWeatherResponse? selectedWeather;
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (AuthService.IsLoggedIn)
+            {
+                await LoadDashboardData();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading dashboard: {ex.Message}";
+            Console.WriteLine(errorMessage);
+        }
+    }
+
+    private async Task LoadDashboardData()
+    {
+        favoriteCities = await AuthService.GetFavoriteCitiesAsync();
+        await LoadWeatherForFavorites();
+    }
+
+    private async Task LoadWeatherForFavorites()
+    {
+        if (favoriteCities == null || !favoriteCities.Any()) return;
+
+        foreach (var city in favoriteCities)
+        {
+            try
+            {
+                var weather = await WeatherService.GetCurrentAsync(city);
+                if (weather != null)
+                {
+                    weatherData[city] = weather;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error loading weather for {city}: {ex.Message}");
+            }
+        }
+        StateHasChanged();
+    }
+
+    private async Task LoadWeather(string city)
+    {
+        if (string.IsNullOrEmpty(city)) return;
+
+        selectedCity = city;
+        try
+        {
+            selectedWeather = await WeatherService.GetCurrentAsync(city);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading weather for {city}: {ex.Message}";
+            Console.WriteLine(errorMessage);
+        }
+    }
+
+    private async Task RemoveFavorite(string city)
+    {
+        if (string.IsNullOrEmpty(city)) return;
+
+        try
+        {
+            var success = await AuthService.RemoveFavoriteCityAsync(city);
+            if (success)
+            {
+                favoriteCities.Remove(city);
+                weatherData.Remove(city);
+                if (selectedCity == city)
+                {
+                    selectedCity = null;
+                    selectedWeather = null;
+                }
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error removing favorite: {ex.Message}";
+            Console.WriteLine(errorMessage);
+        }
+    }
+}
